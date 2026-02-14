@@ -12,12 +12,13 @@ use axum::extract::Path;
 use axum::response::IntoResponse;
 use axum::response::Redirect;
 use axum::http::StatusCode;
+use anyhow::{Context, Result};
 
 
 type SharedState = Arc<Mutex<HashMap<String, String>>>;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()>{
 
     let links: SharedState = Arc::new(Mutex::new(HashMap::new()));
     tracing_subscriber::fmt::init();
@@ -27,8 +28,10 @@ async fn main() {
         .route("/{*path}", get(give_link))
         .with_state(links); 
     
-    let  listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let  listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.context("Can not use this port")?;
+    axum::serve(listener, app).await.context("Error start server")?;
+
+    Ok(())
 }
 
 async fn root () -> String {
@@ -40,7 +43,13 @@ async fn give_link(
         Path(path): Path<String>,
         State(links): State<SharedState>
     ) -> impl IntoResponse {
-    let map = links.lock().unwrap();
+    let map = match links.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            tracing::error!("Mutex is poisoned");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+        }
+    };
 
     tracing::info!("{path}");
     for (full_path, short) in map.iter() {
@@ -51,14 +60,14 @@ async fn give_link(
             }
     }
 
-    (axum::http::StatusCode::NOT_FOUND, "Link not found").into_response()
+    (StatusCode::NOT_FOUND, "Link not found").into_response()
 }
 
 
 async fn shorter (
     State(links): State<SharedState>,
     Query(params): Query<HashMap<String, String>>
-    ) -> String {
+    ) -> impl IntoResponse {
     tracing::info!("Sorter page");
     
     
@@ -67,27 +76,33 @@ async fn shorter (
     match url_to_shorter {
         Some(target_url) => {
 
-            let root_url = "http://localhost:3000/";
+            //let root_url = "http://localhost:3000/";
             let rundom_slug = Alphanumeric.sample_string(&mut rand::rng(), 7);
             //let shorter_url = format!("{}{}", root_url, rundom_slug);
             let shorter_url = format!("{rundom_slug}");
-            let mut map = links.lock().unwrap();
+            let mut map = match links.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    tracing::error!("Mutex is poisoned");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                }
+            };
             {
                 match map.get(target_url) {
                     Some(url) => {
                         tracing::info!("Shorted {} to {}", target_url, url);
-                        format!("Shorted link => {}", url)         
+                        format!("Shorted link => {}", url).into_response()         
                     }
                     None => {
                         map.insert(target_url.to_string(), shorter_url.to_string());
                         tracing::info!("Shorted {} to {}", target_url, shorter_url);
-                        format!("Shorted link => {}", shorter_url)
+                        format!("Shorted link => {}", shorter_url).into_response()
                     } 
                 }
             }
         },
         None => {
-           return  "Error".to_string();
+           return  "Error".into_response();
         }
     }
 
