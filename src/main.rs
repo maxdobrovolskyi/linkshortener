@@ -52,12 +52,16 @@ async fn give_link(
     };
 
     tracing::info!("{path}");
-    for (full_path, short) in map.iter() {
-            println!("{short}, {full_path}, {path}");
-            if path.to_string() == short.to_string() {
-                println!("Yes");
-                return Redirect::permanent(full_path).into_response();         
-            }
+    //for (full_path, short) in map.iter() {
+    //        println!("{short}, {full_path}, {path}");
+    //        if path.to_string() == short.to_string() {
+    //            println!("Yes");
+    //            return Redirect::permanent(full_path).into_response();         
+    //        }
+    //}
+    if let Some(full_path) = map.get(&path) {
+        tracing::info!("Redirecting {} -> {}", path, full_path);
+        return Redirect::permanent(full_path).into_response();
     }
 
     (StatusCode::NOT_FOUND, "Link not found").into_response()
@@ -94,7 +98,7 @@ async fn shorter (
                         format!("Shorted link => {}", url).into_response()         
                     }
                     None => {
-                        map.insert(target_url.to_string(), shorter_url.to_string());
+                        map.insert(shorter_url.to_string(), target_url.to_string());
                         tracing::info!("Shorted {} to {}", target_url, shorter_url);
                         format!("Shorted link => {}", shorter_url).into_response()
                     } 
